@@ -337,7 +337,6 @@ def get_followers():
                     followers_data.append({
                         'username': username,
                         'full_name': full_name,
-                        'user_id': str(user_id_str),
                         'error': f'Could not fetch detailed info: {str(e)}',
                         'bio': '',
                         'is_verified': False,
@@ -349,7 +348,8 @@ def get_followers():
                         'phone': None,
                         'website': None,
                         'business_email': None,
-                        'business_phone': None
+                        'business_phone': None,
+                        'account_type': 'personal'
                     })
                     continue
                 
@@ -425,11 +425,36 @@ def get_followers():
                 
                 contact_info = extract_contact_info(bio, user_dict, external_url)
                 
+                # Determine account type for follower
+                follower_account_type_str = 'personal'
+                follower_is_business = False
+                follower_is_creator = False
+                
+                # Check for business account
+                if hasattr(user_details, 'is_business') and user_details.is_business:
+                    follower_is_business = True
+                    follower_account_type_str = 'business'
+                elif hasattr(user_details, 'is_business_account') and user_details.is_business_account:
+                    follower_is_business = True
+                    follower_account_type_str = 'business'
+                elif user_dict.get('is_business') or user_dict.get('is_business_account'):
+                    follower_is_business = True
+                    follower_account_type_str = 'business'
+                
+                # Check for creator account
+                if hasattr(user_details, 'is_creator') and user_details.is_creator:
+                    follower_is_creator = True
+                    follower_account_type_str = 'creator'
+                elif hasattr(user_details, 'is_creator_account') and user_details.is_creator_account:
+                    follower_is_creator = True
+                    follower_account_type_str = 'creator'
+                elif user_dict.get('is_creator') or user_dict.get('is_creator_account'):
+                    follower_is_creator = True
+                    follower_account_type_str = 'creator'
+                
                 follower_data = {
                     'username': user_details.username,
                     'full_name': user_details.full_name,
-                    'user_id': str(user_details.pk),
-                    'profile_pic_url': user_details.profile_pic_url,
                     'bio': bio,
                     'is_verified': user_details.is_verified,
                     'is_private': user_details.is_private,
@@ -437,6 +462,7 @@ def get_followers():
                     'following_count': user_details.following_count,
                     'post_count': user_details.media_count,
                     'external_url': user_details.external_url,
+                    'account_type': follower_account_type_str,
                     **contact_info
                 }
                 
@@ -457,7 +483,6 @@ def get_followers():
                 
                 followers_data.append({
                     'username': username,
-                    'user_id': str(user_id_str),
                     'error': str(e),
                     'bio': '',
                     'is_verified': False,
@@ -469,7 +494,8 @@ def get_followers():
                     'phone': None,
                     'website': None,
                     'business_email': None,
-                    'business_phone': None
+                    'business_phone': None,
+                    'account_type': 'personal'
                 })
         
         return jsonify({
@@ -611,11 +637,36 @@ def get_user_info():
         
         contact_info = extract_contact_info(bio, user_dict, external_url)
         
+        # Determine account type
+        account_type_str = 'personal'
+        is_business = False
+        is_creator = False
+        
+        # Check for business account
+        if hasattr(user_details, 'is_business') and user_details.is_business:
+            is_business = True
+            account_type_str = 'business'
+        elif hasattr(user_details, 'is_business_account') and user_details.is_business_account:
+            is_business = True
+            account_type_str = 'business'
+        elif user_dict.get('is_business') or user_dict.get('is_business_account'):
+            is_business = True
+            account_type_str = 'business'
+        
+        # Check for creator account
+        if hasattr(user_details, 'is_creator') and user_details.is_creator:
+            is_creator = True
+            account_type_str = 'creator'
+        elif hasattr(user_details, 'is_creator_account') and user_details.is_creator_account:
+            is_creator = True
+            account_type_str = 'creator'
+        elif user_dict.get('is_creator') or user_dict.get('is_creator_account'):
+            is_creator = True
+            account_type_str = 'creator'
+        
         user_data = {
             'username': user_details.username,
             'full_name': user_details.full_name,
-            'user_id': str(user_details.pk),
-            'profile_pic_url': user_details.profile_pic_url,
             'bio': bio,
             'is_verified': user_details.is_verified,
             'is_private': user_details.is_private,
@@ -623,6 +674,7 @@ def get_user_info():
             'following_count': user_details.following_count,
             'post_count': user_details.media_count,
             'external_url': user_details.external_url,
+            'account_type': account_type_str,
             **contact_info
         }
         
