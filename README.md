@@ -4,6 +4,7 @@ A Python Flask server that uses your Instagram account to scrape follower inform
 
 ## Features
 
+
 - Authenticate with your Instagram account
 - Get followers of any Instagram account (by username or user ID)
 - Extract public contact information (email, phone, website) from follower profiles
