@@ -86,16 +86,16 @@ test:
 		echo "  make test USERNAME=specific_user SEARCH=true"; \
 	else \
 		if [ "$(SEARCH)" = "true" ]; then \
-			$(PYTHON_VENV) example.py --user $(USERNAME); \
+			$(PYTHON_VENV) test.py --user $(USERNAME); \
 		else \
-			$(PYTHON_VENV) example.py $(USERNAME) $(LIMIT); \
+			$(PYTHON_VENV) test.py $(USERNAME) $(LIMIT); \
 		fi \
 	fi
 
 # Test with default account (you can change this)
 test-default:
 	@echo "🧪 Running test with default account..."
-	@$(PYTHON_VENV) example.py nachogonzalezxx 10
+	@$(PYTHON_VENV) test.py nachogonzalezxx 10
 
 # Stop server (find and kill process on port 5001)
 stop:
