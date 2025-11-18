@@ -315,6 +315,7 @@ def get_followers():
 @app.route('/user-info', methods=['POST'])
 def get_user_info():
     """Get information about a specific user"""
+    global cl
     try:
         client = get_client()
         data = request.json or {}
@@ -325,12 +326,37 @@ def get_user_info():
         if not target_username and not target_user_id:
             return jsonify({'error': 'Either username or user_id is required'}), 400
         
+        # Get user ID if username provided
         if target_username:
-            user_id = client.user_id_from_username(target_username)
+            try:
+                user_id = client.user_id_from_username(target_username)
+            except LoginRequired:
+                # Re-authenticate and retry
+                print("🔄 Session expired during username lookup, re-authenticating...")
+                cl = None
+                client = get_client(force_login=True)
+                try:
+                    user_id = client.user_id_from_username(target_username)
+                except UserNotFound:
+                    return jsonify({'error': f'User @{target_username} not found'}), 404
+            except UserNotFound:
+                return jsonify({'error': f'User @{target_username} not found'}), 404
         else:
             user_id = target_user_id
         
-        user_details = client.user_info(user_id)
+        # Get user details
+        try:
+            user_details = client.user_info(user_id)
+        except LoginRequired:
+            # Try to re-authenticate and retry once
+            print("🔄 Session expired, attempting re-authentication...")
+            try:
+                cl = None  # Reset client
+                client = get_client(force_login=True)
+                user_details = client.user_info(user_id)
+            except Exception as retry_error:
+                return jsonify({'error': f'Session expired and re-authentication failed: {str(retry_error)}'}), 401
+        
         bio = user_details.biography or ''
         contact_info = extract_contact_info(bio, user_details.dict())
         

@@ -63,10 +63,19 @@ run:
 test:
 	@echo "🧪 Running test script..."
 	@if [ -z "$(USERNAME)" ]; then \
-		echo "Usage: make test USERNAME=target_account [LIMIT=20]"; \
-		echo "Example: make test USERNAME=nachogonzalezxx LIMIT=10"; \
+		echo "Usage:"; \
+		echo "  Get followers: make test USERNAME=target_account [LIMIT=20]"; \
+		echo "  Search user:    make test USERNAME=target_account SEARCH=true"; \
+		echo ""; \
+		echo "Examples:"; \
+		echo "  make test USERNAME=nachogonzalezxx LIMIT=10"; \
+		echo "  make test USERNAME=specific_user SEARCH=true"; \
 	else \
-		$(PYTHON_VENV) example.py $(USERNAME) $(LIMIT); \
+		if [ "$(SEARCH)" = "true" ]; then \
+			$(PYTHON_VENV) example.py --user $(USERNAME); \
+		else \
+			$(PYTHON_VENV) example.py $(USERNAME) $(LIMIT); \
+		fi \
 	fi
 
 # Test with default account (you can change this)
