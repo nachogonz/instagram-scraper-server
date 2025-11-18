@@ -7,7 +7,7 @@ help:
 	@echo "  make setup      - Initial setup (create venv, install deps)"
 	@echo "  make install    - Install dependencies"
 	@echo "  make dev        - Run development server"
-	@echo "  make test       - Run example script with test account"
+	@echo "  make test       - Run example script (single user or CSV batch)"
 	@echo "  make run        - Run production server"
 	@echo "  make stop       - Stop running server"
 	@echo "  make clean      - Clean up cache and session files"
@@ -74,13 +74,33 @@ run:
 # Run example/test script (always searches for user info)
 test:
 	@echo "🧪 Running test script..."
-	@if [ -z "$(USERNAME)" ]; then \
+	@if [ -n "$(CSV)" ]; then \
+		if [ -z "$(LIMIT)" ]; then \
+			echo "❌ Error: LIMIT is required for CSV batch mode"; \
+			echo ""; \
+			echo "Usage:"; \
+			echo "  make test CSV=1 LIMIT=10"; \
+			echo "  make test CSV=docs/kilombo.csv LIMIT=50"; \
+			exit 1; \
+		fi; \
+		if [ "$(CSV)" = "1" ]; then \
+			$(PYTHON_VENV) src/test.py --csv $(LIMIT); \
+		else \
+			$(PYTHON_VENV) src/test.py --csv $(CSV) $(LIMIT); \
+		fi; \
+	elif [ -z "$(USERNAME)" ]; then \
 		echo "Usage:"; \
-		echo "  make test USERNAME=target_account [LIMIT=20]"; \
+		echo "  Single user mode:"; \
+		echo "    make test USERNAME=target_account"; \
+		echo ""; \
+		echo "  CSV batch mode:"; \
+		echo "    make test CSV=1 LIMIT=10"; \
+		echo "    make test CSV=docs/kilombo.csv LIMIT=50"; \
 		echo ""; \
 		echo "Examples:"; \
 		echo "  make test USERNAME=leomessi"; \
-		echo "  make test USERNAME=leomessi LIMIT=10"; \
+		echo "  make test CSV=1 LIMIT=10"; \
+		echo "  make test CSV=docs/kilombo.csv LIMIT=50"; \
 	else \
 		$(PYTHON_VENV) src/test.py $(USERNAME) $(LIMIT); \
 	fi
