@@ -66,12 +66,12 @@ dev:
 	fi
 	@echo "📝 Debug mode: ON"
 	@echo "🔄 Auto-reload: OFF (to avoid reloading on example.py changes)"
-	@$(PYTHON_VENV) app.py
+	@$(PYTHON_VENV) src/app.py
 
 # Run production server (no debug)
 run:
 	@echo "🚀 Starting production server..."
-	@FLASK_DEBUG=False FLASK_USE_RELOADER=False $(PYTHON_VENV) app.py
+	@FLASK_DEBUG=False FLASK_USE_RELOADER=False $(PYTHON_VENV) src/app.py
 
 # Run example/test script
 test:
@@ -86,16 +86,16 @@ test:
 		echo "  make test USERNAME=specific_user SEARCH=true"; \
 	else \
 		if [ "$(SEARCH)" = "true" ]; then \
-			$(PYTHON_VENV) test.py --user $(USERNAME); \
+			$(PYTHON_VENV) src/test.py --user $(USERNAME); \
 		else \
-			$(PYTHON_VENV) test.py $(USERNAME) $(LIMIT); \
+			$(PYTHON_VENV) src/test.py $(USERNAME) $(LIMIT); \
 		fi \
 	fi
 
 # Test with default account (you can change this)
 test-default:
 	@echo "🧪 Running test with default account..."
-	@$(PYTHON_VENV) test.py nachogonzalezxx 10
+	@$(PYTHON_VENV) src/test.py nachogonzalezxx 10
 
 # Stop server (find and kill process on port 5001)
 stop:
@@ -121,18 +121,18 @@ clean:
 lint:
 	@echo "🔍 Linting code..."
 	@$(PIP) install flake8 >/dev/null 2>&1 || true
-	@$(VENV_BIN)/flake8 app.py example.py --max-line-length=120 --ignore=E501,W503 || echo "Install flake8: pip install flake8"
+	@$(VENV_BIN)/flake8 src/app.py src/test.py --max-line-length=120 --ignore=E501,W503 || echo "Install flake8: pip install flake8"
 
 # Format code (if you have black installed)
 format:
 	@echo "✨ Formatting code..."
 	@$(PIP) install black >/dev/null 2>&1 || true
-	@$(VENV_BIN)/black app.py example.py --line-length=120 || echo "Install black: pip install black"
+	@$(VENV_BIN)/black src/app.py src/test.py --line-length=120 || echo "Install black: pip install black"
 
 # Open Python shell with app context
 shell:
 	@echo "🐍 Opening Python shell..."
-	@$(PYTHON_VENV) -i -c "from app import app, get_client; print('App and client loaded. Use: app, get_client()')"
+	@$(PYTHON_VENV) -i -c "from src.app import app, get_client; print('App and client loaded. Use: app, get_client()')"
 
 # Check if server is running
 status:
