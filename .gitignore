@@ -12,4 +12,4 @@ ENV/
 .DS_Store
 session.json
 *.session
-
+data/
