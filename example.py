@@ -70,20 +70,28 @@ def get_followers(username: str, limit: int = 20):
                 print(f"   Bio: {bio_display}")
             
             contact_found = False
-            if follower.get('email'):
-                print(f"   📧 Email: {follower['email']}")
+            
+            # Always show email (primary or business)
+            email_to_show = follower.get('email') or follower.get('business_email')
+            if email_to_show:
+                print(f"   📧 Email: {email_to_show}")
                 contact_found = True
-            if follower.get('phone'):
-                print(f"   📞 Phone: {follower['phone']}")
+                if follower.get('business_email') and follower.get('email') != follower.get('business_email'):
+                    print(f"   📧 Business Email: {follower['business_email']}")
+            
+            # Always show phone (primary or business)
+            phone_to_show = follower.get('phone') or follower.get('business_phone')
+            if phone_to_show:
+                print(f"   📞 Phone: {phone_to_show}")
+                contact_found = True
+                if follower.get('business_phone') and follower.get('phone') != follower.get('business_phone'):
+                    print(f"   📞 Business Phone: {follower['business_phone']}")
+            
+            if follower.get('facebook_page'):
+                print(f"   📘 Facebook: {follower['facebook_page']}")
                 contact_found = True
             if follower.get('website'):
                 print(f"   🌐 Website: {follower['website']}")
-                contact_found = True
-            if follower.get('business_email'):
-                print(f"   📧 Business Email: {follower['business_email']}")
-                contact_found = True
-            if follower.get('business_phone'):
-                print(f"   📞 Business Phone: {follower['business_phone']}")
                 contact_found = True
             
             if not contact_found:
@@ -163,23 +171,31 @@ def get_user_info(username: str):
         
         contact_found = False
         print(f"\n📧 Contact Information:")
-        if user.get('email'):
-            print(f"   📧 Email: {user['email']}")
+        
+        # Always show email (primary or business)
+        email_to_show = user.get('email') or user.get('business_email')
+        if email_to_show:
+            print(f"   📧 Email: {email_to_show}")
             contact_found = True
-        if user.get('phone'):
-            print(f"   📞 Phone: {user['phone']}")
+            if user.get('business_email') and user.get('email') != user.get('business_email'):
+                print(f"   📧 Business Email: {user['business_email']}")
+        
+        # Always show phone (primary or business)
+        phone_to_show = user.get('phone') or user.get('business_phone')
+        if phone_to_show:
+            print(f"   📞 Phone: {phone_to_show}")
+            contact_found = True
+            if user.get('business_phone') and user.get('phone') != user.get('business_phone'):
+                print(f"   📞 Business Phone: {user['business_phone']}")
+        
+        if user.get('facebook_page'):
+            print(f"   📘 Facebook: {user['facebook_page']}")
             contact_found = True
         if user.get('website'):
             print(f"   🌐 Website: {user['website']}")
             contact_found = True
         if user.get('external_url'):
             print(f"   🔗 External URL: {user['external_url']}")
-            contact_found = True
-        if user.get('business_email'):
-            print(f"   📧 Business Email: {user['business_email']}")
-            contact_found = True
-        if user.get('business_phone'):
-            print(f"   📞 Business Phone: {user['business_phone']}")
             contact_found = True
         
         if not contact_found:

@@ -85,42 +85,137 @@ def ensure_logged_in(func):
             return func(*args, **kwargs)  # Retry once
     return wrapper
 
-def extract_contact_info(bio: str, user_info: Dict) -> Dict[str, Optional[str]]:
-    """Extract contact information from bio and user info"""
+def extract_contact_info(bio: str, user_info: Dict, external_url: Optional[str] = None) -> Dict[str, Optional[str]]:
+    """Extract contact information from bio, external URL, and user info"""
     contact_info = {
         'email': None,
         'phone': None,
+        'facebook_page': None,
         'website': None,
         'business_email': None,
         'business_phone': None,
     }
     
-    # Extract email from bio
+    # Combine bio and external_url for searching
+    search_text = bio
+    if external_url:
+        search_text += ' ' + external_url
+    
+    # Extract email from bio and external URL
     email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-    emails = re.findall(email_pattern, bio)
+    emails = re.findall(email_pattern, search_text, re.IGNORECASE)
     if emails:
-        contact_info['email'] = emails[0]
+        # Prefer emails that don't look like social media emails
+        for email in emails:
+            if not any(domain in email.lower() for domain in ['noreply', 'no-reply', 'instagram', 'facebook', 'twitter']):
+                contact_info['email'] = email
+                break
+        # If no "good" email found, use first one
+        if not contact_info['email'] and emails:
+            contact_info['email'] = emails[0]
     
-    # Extract phone from bio
-    phone_pattern = r'[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}'
-    phones = re.findall(phone_pattern, bio)
+    # Extract phone from bio and external URL
+    # More comprehensive phone patterns
+    phone_patterns = [
+        r'[\+]?1?[-.\s]?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}',  # US format
+        r'[\+]?[0-9]{1,4}[-.\s]?[0-9]{1,4}[-.\s]?[0-9]{1,4}[-.\s]?[0-9]{1,9}',  # International
+        r'[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}',  # General
+        r'[\+]?[0-9]{10,15}',  # Long number sequences
+    ]
+    
+    phones = []
+    for pattern in phone_patterns:
+        found = re.findall(pattern, search_text)
+        phones.extend(found)
+    
     if phones:
-        contact_info['phone'] = phones[0]
+        # Clean up phone numbers (remove common separators, keep + if present)
+        cleaned_phones = []
+        for phone in phones:
+            # Remove common separators but keep structure
+            cleaned = re.sub(r'[^\d+]', '', phone)
+            # Only keep if it's a reasonable length (10-15 digits)
+            if len(re.sub(r'\+', '', cleaned)) >= 10:
+                cleaned_phones.append(phone)
+        
+        if cleaned_phones:
+            contact_info['phone'] = cleaned_phones[0]
     
-    # Extract website/URL from bio
-    url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
-    urls = re.findall(url_pattern, bio)
+    # Extract Facebook page links
+    facebook_patterns = [
+        r'https?://(?:www\.)?(?:facebook|fb)\.com/[a-zA-Z0-9.]+',
+        r'https?://(?:www\.)?(?:facebook|fb)\.com/[a-zA-Z0-9./-]+',
+        r'facebook\.com/[a-zA-Z0-9.]+',
+        r'fb\.com/[a-zA-Z0-9.]+',
+        r'@[a-zA-Z0-9.]+.*facebook',
+        r'facebook.*@[a-zA-Z0-9.]+',
+    ]
+    
+    facebook_links = []
+    for pattern in facebook_patterns:
+        found = re.findall(pattern, search_text, re.IGNORECASE)
+        facebook_links.extend(found)
+    
+    if facebook_links:
+        # Clean and format Facebook URLs
+        fb_link = facebook_links[0]
+        # If it doesn't start with http, add it
+        if not fb_link.startswith('http'):
+            fb_link = 'https://' + fb_link
+        # Ensure it's a full URL
+        if 'facebook.com' not in fb_link and 'fb.com' not in fb_link:
+            if fb_link.startswith('@'):
+                fb_link = 'https://facebook.com/' + fb_link[1:]
+            else:
+                fb_link = 'https://facebook.com/' + fb_link
+        contact_info['facebook_page'] = fb_link
+    
+    # Extract other website/URL from bio (non-Facebook)
+    url_pattern = r'https?://(?:www\.)?[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s]*)?'
+    urls = re.findall(url_pattern, search_text)
     if urls:
-        contact_info['website'] = urls[0]
+        # Filter out Facebook URLs and Instagram URLs
+        non_social_urls = [url for url in urls if 'facebook' not in url.lower() and 'fb.com' not in url.lower() and 'instagram.com' not in url.lower()]
+        if non_social_urls:
+            contact_info['website'] = non_social_urls[0]
+        elif urls:
+            contact_info['website'] = urls[0]
     
     # Check for business contact info
     # Handle case where user_info might not be a dict
     if isinstance(user_info, dict):
-        if user_info.get('is_business'):
+        # Check if it's a business account
+        is_business = user_info.get('is_business', False) or user_info.get('is_business_account', False)
+        
+        if is_business:
+            # Try multiple ways to get business contact info
             business_contact = user_info.get('business_contact_method', {})
+            if not business_contact and isinstance(user_info.get('business_contact_method'), dict):
+                business_contact = user_info.get('business_contact_method')
+            
+            # Also check direct fields
             if isinstance(business_contact, dict):
-                contact_info['business_email'] = business_contact.get('email')
-                contact_info['business_phone'] = business_contact.get('phone_number')
+                business_email = business_contact.get('email') or business_contact.get('email_address')
+                business_phone = business_contact.get('phone_number') or business_contact.get('phone') or business_contact.get('contact_phone_number')
+                
+                # Use business email as primary email if no regular email found
+                if business_email:
+                    if not contact_info['email']:
+                        contact_info['email'] = business_email
+                    contact_info['business_email'] = business_email
+                
+                # Use business phone as primary phone if no regular phone found
+                if business_phone:
+                    if not contact_info['phone']:
+                        contact_info['phone'] = business_phone
+                    contact_info['business_phone'] = business_phone
+            
+            # Also check for direct business fields in user_info
+            if not contact_info['email']:
+                direct_business_email = user_info.get('public_email') or user_info.get('business_email')
+                if direct_business_email:
+                    contact_info['email'] = direct_business_email
+                    contact_info['business_email'] = direct_business_email
     
     return contact_info
 
@@ -252,14 +347,34 @@ def get_followers():
                     })
                     continue
                 
-                # Extract contact info from bio
+                # Extract contact info from bio and external URL
                 bio = user_details.biography or ''
-                # Safely convert user_details to dict
+                external_url = getattr(user_details, 'external_url', None) or ''
+                
+                # Safely convert user_details to dict and extract business info
                 try:
                     user_dict = user_details.dict() if hasattr(user_details, 'dict') else {}
                 except:
                     user_dict = {}
-                contact_info = extract_contact_info(bio, user_dict)
+                
+                # Also try to get business contact info directly from user_details object
+                try:
+                    if hasattr(user_details, 'is_business') and user_details.is_business:
+                        if hasattr(user_details, 'business_contact_method'):
+                            business_method = user_details.business_contact_method
+                            if business_method:
+                                if hasattr(business_method, 'email') and business_method.email:
+                                    if 'business_contact_method' not in user_dict:
+                                        user_dict['business_contact_method'] = {}
+                                    user_dict['business_contact_method']['email'] = business_method.email
+                                if hasattr(business_method, 'phone_number') and business_method.phone_number:
+                                    if 'business_contact_method' not in user_dict:
+                                        user_dict['business_contact_method'] = {}
+                                    user_dict['business_contact_method']['phone_number'] = business_method.phone_number
+                except Exception as e:
+                    pass  # Silently fail for followers to avoid spam
+                
+                contact_info = extract_contact_info(bio, user_dict, external_url)
                 
                 follower_data = {
                     'username': user_details.username,
@@ -376,12 +491,32 @@ def get_user_info():
             raise
         
         bio = user_details.biography or ''
-        # Safely convert user_details to dict
+        external_url = getattr(user_details, 'external_url', None) or ''
+        
+        # Safely convert user_details to dict and extract business info
         try:
             user_dict = user_details.dict() if hasattr(user_details, 'dict') else {}
         except:
             user_dict = {}
-        contact_info = extract_contact_info(bio, user_dict)
+        
+        # Also try to get business contact info directly from user_details object
+        try:
+            if hasattr(user_details, 'is_business') and user_details.is_business:
+                if hasattr(user_details, 'business_contact_method'):
+                    business_method = user_details.business_contact_method
+                    if business_method:
+                        if hasattr(business_method, 'email') and business_method.email:
+                            if 'business_contact_method' not in user_dict:
+                                user_dict['business_contact_method'] = {}
+                            user_dict['business_contact_method']['email'] = business_method.email
+                        if hasattr(business_method, 'phone_number') and business_method.phone_number:
+                            if 'business_contact_method' not in user_dict:
+                                user_dict['business_contact_method'] = {}
+                            user_dict['business_contact_method']['phone_number'] = business_method.phone_number
+        except Exception as e:
+            print(f"⚠️  Could not extract business contact from object: {e}")
+        
+        contact_info = extract_contact_info(bio, user_dict, external_url)
         
         user_data = {
             'username': user_details.username,
