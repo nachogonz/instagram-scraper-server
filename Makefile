@@ -64,8 +64,6 @@ dev:
 	else \
 		echo "⚠️  .env file not found"; \
 	fi
-	@echo "📝 Debug mode: ON"
-	@echo "🔄 Auto-reload: OFF (to avoid reloading on example.py changes)"
 	@$(PYTHON_VENV) src/app.py
 
 # Run production server (no debug)
@@ -73,29 +71,19 @@ run:
 	@echo "🚀 Starting production server..."
 	@FLASK_DEBUG=False FLASK_USE_RELOADER=False $(PYTHON_VENV) src/app.py
 
-# Run example/test script
+# Run example/test script (always searches for user info)
 test:
 	@echo "🧪 Running test script..."
 	@if [ -z "$(USERNAME)" ]; then \
 		echo "Usage:"; \
-		echo "  Get followers: make test USERNAME=target_account [LIMIT=20]"; \
-		echo "  Search user:    make test USERNAME=target_account SEARCH=true"; \
+		echo "  make test USERNAME=target_account [LIMIT=20]"; \
 		echo ""; \
 		echo "Examples:"; \
-		echo "  make test USERNAME=nachogonzalezxx LIMIT=10"; \
-		echo "  make test USERNAME=specific_user SEARCH=true"; \
+		echo "  make test USERNAME=leomessi"; \
+		echo "  make test USERNAME=leomessi LIMIT=10"; \
 	else \
-		if [ "$(SEARCH)" = "true" ]; then \
-			$(PYTHON_VENV) src/test.py --user $(USERNAME); \
-		else \
-			$(PYTHON_VENV) src/test.py $(USERNAME) $(LIMIT); \
-		fi \
+		$(PYTHON_VENV) src/test.py $(USERNAME) $(LIMIT); \
 	fi
-
-# Test with default account (you can change this)
-test-default:
-	@echo "🧪 Running test with default account..."
-	@$(PYTHON_VENV) src/test.py nachogonzalezxx 10
 
 # Stop server (find and kill process on port 5001)
 stop:

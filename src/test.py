@@ -4,6 +4,7 @@ Example script to test the Instagram scraper API
 """
 import requests
 import json
+import os
 
 BASE_URL = "http://localhost:5001"
 
@@ -103,7 +104,8 @@ def get_followers(username: str, limit: int = 20):
         
         # Save to JSON file
         try:
-            filename = f'followers_{username}.json'
+            os.makedirs('data', exist_ok=True)
+            filename = f'data/followers_{username}.json'
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             print(f"\n✅ Data saved to {filename}")
@@ -206,7 +208,8 @@ def get_user_info(username: str):
         
         # Save to JSON file
         try:
-            filename = f'user_{username}.json'
+            os.makedirs('data', exist_ok=True)
+            filename = f'data/user_{username}.json'
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             print(f"\n✅ Data saved to {filename}")
@@ -229,71 +232,41 @@ if __name__ == "__main__":
     
     if len(sys.argv) < 2:
         print("="*60)
-        print("Instagram Scraper - Example Script")
+        print("Instagram Scraper - Test Script")
         print("="*60)
         print("\nUsage:")
-        print("  Get followers: python test.py <username> [limit]")
-        print("  Search user:  python test.py --user <username>")
-        print("                python test.py -u <username>")
+        print("  python test.py <username> [limit]")
         print("\nExamples:")
-        print("  # Get 20 followers of an account")
-        print("  python test.py target_account")
-        print("  python test.py target_account 10")
-        print("")
-        print("  # Search for a specific user")
-        print("  python test.py --user specific_user")
-        print("  python test.py -u specific_user")
+        print("  python test.py leomessi")
+        print("  python test.py leomessi 10")
         print("\nNote: Make sure the server is running first:")
-        print("  python app.py")
+        print("  make dev")
         print("="*60)
         sys.exit(1)
     
-    # Check if user wants to search for a specific user
-    if sys.argv[1] in ['--user', '-u', '--search', '-s']:
-        if len(sys.argv) < 3:
-            print("❌ Error: Username required after --user/-u flag")
-            print("Usage: python test.py --user <username>")
-            sys.exit(1)
-        
-        username = sys.argv[2].strip().lstrip('@')
-        
-        print(f"\n🔍 Searching for user @{username}...\n")
-        
-        if not test_health():
-            print("\n💡 Tip: Start the server in another terminal with: python app.py")
-            sys.exit(1)
-        
-        result = get_user_info(username)
-        
-        if result:
-            print("\n✅ Done!")
-        else:
-            print("\n❌ Failed to fetch user info")
-            sys.exit(1)
-    else:
-        # Get followers mode (default)
-        username = sys.argv[1].strip().lstrip('@')  # Remove @ if present
-        
+    # Always search for user info (uses account from app login)
+    username = sys.argv[1].strip().lstrip('@')  # Remove @ if present
+    
+    # LIMIT is kept for backward compatibility but not used for user info
+    if len(sys.argv) > 2:
         try:
-            limit = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+            limit = int(sys.argv[2])
             if limit < 1 or limit > 100:
-                print("⚠️  Limit should be between 1 and 100. Using default: 20")
-                limit = 20
+                print("⚠️  Limit parameter ignored for user search")
         except ValueError:
-            print("⚠️  Invalid limit. Using default: 20")
-            limit = 20
-        
-        print(f"\n🔍 Fetching {limit} followers for @{username}...\n")
-        
-        if not test_health():
-            print("\n💡 Tip: Start the server in another terminal with: python app.py")
-            sys.exit(1)
-        
-        result = get_followers(username, limit)
-        
-        if result:
-            print("\n✅ Done!")
-        else:
-            print("\n❌ Failed to fetch followers")
-            sys.exit(1)
+            pass
+    
+    print(f"\n🔍 Searching for user @{username}...\n")
+    
+    if not test_health():
+        print("\n💡 Tip: Start the server in another terminal with: make dev")
+        sys.exit(1)
+    
+    result = get_user_info(username)
+    
+    if result:
+        print("\n✅ Done!")
+    else:
+        print("\n❌ Failed to fetch user info")
+        sys.exit(1)
 
