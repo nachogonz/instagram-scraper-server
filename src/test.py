@@ -203,9 +203,6 @@ def get_user_info(username: str):
         if not contact_found:
             print("   ⚠️  No contact info found")
         
-        if user.get('profile_pic_url'):
-            print(f"\n🖼️  Profile Picture: {user['profile_pic_url']}")
-        
         # Save to JSON file
         try:
             os.makedirs('data', exist_ok=True)
