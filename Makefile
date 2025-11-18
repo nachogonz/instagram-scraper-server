@@ -53,7 +53,11 @@ dev:
 	@if [ -f .env ]; then \
 		ACCOUNT=$$(grep "^INSTAGRAM_USERNAME=" .env | cut -d'=' -f2 | tr -d '"' | tr -d "'"); \
 		if [ -n "$$ACCOUNT" ]; then \
-			echo "👤 Active account: $$ACCOUNT"; \
+			echo ""; \
+			echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
+			echo "  👤  ACTIVE ACCOUNT: \033[1;33m$$ACCOUNT\033[0m"; \
+			echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; \
+			echo ""; \
 		else \
 			echo "⚠️  No active account found in .env"; \
 		fi; \
