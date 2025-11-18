@@ -85,6 +85,46 @@ def ensure_logged_in(func):
             return func(*args, **kwargs)  # Retry once
     return wrapper
 
+def format_phone_with_country_code(phone: str, country_code: Optional[str] = None) -> str:
+    """Format phone number with country code (+ prefix)"""
+    if not phone:
+        return phone
+    
+    # Remove all non-digit characters except +
+    cleaned = re.sub(r'[^\d+]', '', str(phone))
+    
+    # If already has country code (starts with +), return as is
+    if cleaned.startswith('+'):
+        return cleaned
+    
+    # If country code is provided, use it
+    if country_code:
+        # Remove + if present in country_code
+        cc = str(country_code).replace('+', '').strip()
+        # Remove leading zeros
+        cc = cc.lstrip('0')
+        return f"+{cc}{cleaned}"
+    
+    # Detect US/Canada numbers (10 digits, or 11 digits starting with 1)
+    digits_only = re.sub(r'\D', '', cleaned)
+    
+    # If 11 digits and starts with 1, it's US/Canada with country code
+    if len(digits_only) == 11 and digits_only.startswith('1'):
+        return f"+{digits_only}"
+    
+    # If 10 digits, assume US/Canada and add +1
+    if len(digits_only) == 10:
+        # Check if it's a US toll-free or common US number pattern
+        # US area codes start with 2-9, toll-free: 800, 888, 877, 866, 855, 844, 833
+        first_three = digits_only[:3]
+        if (digits_only[0] in '23456789' or 
+            first_three in ['800', '888', '877', '866', '855', '844', '833']):
+            return f"+1{digits_only}"
+    
+    # For other lengths, return as is (might be international without +)
+    # Or could add logic to detect other countries
+    return cleaned
+
 def extract_contact_info(bio: str, user_info: Dict, external_url: Optional[str] = None) -> Dict[str, Optional[str]]:
     """Extract contact information from bio, external URL, and user info"""
     contact_info = {
@@ -151,20 +191,22 @@ def extract_contact_info(bio: str, user_info: Dict, external_url: Optional[str] 
             if not business_contact and isinstance(user_info.get('business_contact_method'), dict):
                 business_contact = user_info.get('business_contact_method')
             
-            # Also check direct fields
+                # Also check direct fields
             if isinstance(business_contact, dict):
                 business_email = business_contact.get('email') or business_contact.get('email_address')
                 business_phone = (business_contact.get('phone_number') or 
                                  business_contact.get('phone') or 
                                  business_contact.get('contact_phone_number') or
                                  business_contact.get('public_phone_number'))
+                business_country_code = (business_contact.get('country_code') or 
+                                       business_contact.get('phone_country_code'))
                 
                 # Only set business contact info if it's from public business settings
                 if business_email:
                     contact_info['business_email'] = business_email
                 
                 if business_phone:
-                    contact_info['business_phone'] = business_phone
+                    contact_info['business_phone'] = format_phone_with_country_code(business_phone, business_country_code)
             
             # Also check for direct business fields in user_info (public business info)
             direct_business_email = user_info.get('public_email') or user_info.get('business_email')
@@ -176,8 +218,10 @@ def extract_contact_info(bio: str, user_info: Dict, external_url: Optional[str] 
                 direct_business_phone = (user_info.get('business_phone_number') or 
                                        user_info.get('public_phone_number') or 
                                        user_info.get('contact_phone_number'))
+                direct_country_code = (user_info.get('phone_country_code') or 
+                                     user_info.get('country_code'))
                 if direct_business_phone:
-                    contact_info['business_phone'] = direct_business_phone
+                    contact_info['business_phone'] = format_phone_with_country_code(direct_business_phone, direct_country_code)
     
     return contact_info
 
@@ -343,12 +387,21 @@ def get_followers():
                                 elif hasattr(business_method, 'public_phone_number') and business_method.public_phone_number:
                                     phone_number = business_method.public_phone_number
                                 
+                                # Also check for country code
+                                country_code = None
+                                if hasattr(business_method, 'country_code') and business_method.country_code:
+                                    country_code = business_method.country_code
+                                elif hasattr(business_method, 'phone_country_code') and business_method.phone_country_code:
+                                    country_code = business_method.phone_country_code
+                                
                                 if phone_number:
-                                    user_dict['business_contact_method']['phone_number'] = phone_number
+                                    formatted_phone = format_phone_with_country_code(phone_number, country_code)
+                                    user_dict['business_contact_method']['phone_number'] = formatted_phone
                         
                         # Also check for phone number directly on user_details object
                         if not user_dict.get('business_contact_method', {}).get('phone_number'):
                             direct_phone = None
+                            direct_country_code = None
                             if hasattr(user_details, 'business_phone_number') and user_details.business_phone_number:
                                 direct_phone = user_details.business_phone_number
                             elif hasattr(user_details, 'public_phone_number') and user_details.public_phone_number:
@@ -356,10 +409,17 @@ def get_followers():
                             elif hasattr(user_details, 'contact_phone_number') and user_details.contact_phone_number:
                                 direct_phone = user_details.contact_phone_number
                             
+                            # Check for country code on user_details
+                            if hasattr(user_details, 'phone_country_code') and user_details.phone_country_code:
+                                direct_country_code = user_details.phone_country_code
+                            elif hasattr(user_details, 'country_code') and user_details.country_code:
+                                direct_country_code = user_details.country_code
+                            
                             if direct_phone:
                                 if 'business_contact_method' not in user_dict:
                                     user_dict['business_contact_method'] = {}
-                                user_dict['business_contact_method']['phone_number'] = direct_phone
+                                formatted_phone = format_phone_with_country_code(direct_phone, direct_country_code)
+                                user_dict['business_contact_method']['phone_number'] = formatted_phone
                 except Exception as e:
                     pass  # Silently fail for followers to avoid spam
                 
@@ -512,12 +572,22 @@ def get_user_info():
                         elif hasattr(business_method, 'public_phone_number') and business_method.public_phone_number:
                             phone_number = business_method.public_phone_number
                         
+                        # Also check for country code separately
+                        country_code = None
+                        if hasattr(business_method, 'country_code') and business_method.country_code:
+                            country_code = business_method.country_code
+                        elif hasattr(business_method, 'phone_country_code') and business_method.phone_country_code:
+                            country_code = business_method.phone_country_code
+                        
                         if phone_number:
-                            user_dict['business_contact_method']['phone_number'] = phone_number
+                            # Format phone number with country code
+                            formatted_phone = format_phone_with_country_code(phone_number, country_code)
+                            user_dict['business_contact_method']['phone_number'] = formatted_phone
                 
                 # Also check for phone number directly on user_details object
                 if not user_dict.get('business_contact_method', {}).get('phone_number'):
                     direct_phone = None
+                    direct_country_code = None
                     if hasattr(user_details, 'business_phone_number') and user_details.business_phone_number:
                         direct_phone = user_details.business_phone_number
                     elif hasattr(user_details, 'public_phone_number') and user_details.public_phone_number:
@@ -525,10 +595,17 @@ def get_user_info():
                     elif hasattr(user_details, 'contact_phone_number') and user_details.contact_phone_number:
                         direct_phone = user_details.contact_phone_number
                     
+                    # Check for country code on user_details
+                    if hasattr(user_details, 'phone_country_code') and user_details.phone_country_code:
+                        direct_country_code = user_details.phone_country_code
+                    elif hasattr(user_details, 'country_code') and user_details.country_code:
+                        direct_country_code = user_details.country_code
+                    
                     if direct_phone:
                         if 'business_contact_method' not in user_dict:
                             user_dict['business_contact_method'] = {}
-                        user_dict['business_contact_method']['phone_number'] = direct_phone
+                        formatted_phone = format_phone_with_country_code(direct_phone, direct_country_code)
+                        user_dict['business_contact_method']['phone_number'] = formatted_phone
         except Exception as e:
             print(f"⚠️  Could not extract business contact from object: {e}")
         
