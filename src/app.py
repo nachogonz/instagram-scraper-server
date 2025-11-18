@@ -88,8 +88,6 @@ def ensure_logged_in(func):
 def extract_contact_info(bio: str, user_info: Dict, external_url: Optional[str] = None) -> Dict[str, Optional[str]]:
     """Extract contact information from bio, external URL, and user info"""
     contact_info = {
-        'email': None,
-        'phone': None,
         'facebook_page': None,
         'website': None,
         'business_email': None,
@@ -100,46 +98,6 @@ def extract_contact_info(bio: str, user_info: Dict, external_url: Optional[str] 
     search_text = bio
     if external_url:
         search_text += ' ' + external_url
-    
-    # Extract email from bio and external URL
-    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-    emails = re.findall(email_pattern, search_text, re.IGNORECASE)
-    if emails:
-        # Prefer emails that don't look like social media emails
-        for email in emails:
-            if not any(domain in email.lower() for domain in ['noreply', 'no-reply', 'instagram', 'facebook', 'twitter']):
-                contact_info['email'] = email
-                break
-        # If no "good" email found, use first one
-        if not contact_info['email'] and emails:
-            contact_info['email'] = emails[0]
-    
-    # Extract phone from bio and external URL
-    # More comprehensive phone patterns
-    phone_patterns = [
-        r'[\+]?1?[-.\s]?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}',  # US format
-        r'[\+]?[0-9]{1,4}[-.\s]?[0-9]{1,4}[-.\s]?[0-9]{1,4}[-.\s]?[0-9]{1,9}',  # International
-        r'[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}',  # General
-        r'[\+]?[0-9]{10,15}',  # Long number sequences
-    ]
-    
-    phones = []
-    for pattern in phone_patterns:
-        found = re.findall(pattern, search_text)
-        phones.extend(found)
-    
-    if phones:
-        # Clean up phone numbers (remove common separators, keep + if present)
-        cleaned_phones = []
-        for phone in phones:
-            # Remove common separators but keep structure
-            cleaned = re.sub(r'[^\d+]', '', phone)
-            # Only keep if it's a reasonable length (10-15 digits)
-            if len(re.sub(r'\+', '', cleaned)) >= 10:
-                cleaned_phones.append(phone)
-        
-        if cleaned_phones:
-            contact_info['phone'] = cleaned_phones[0]
     
     # Extract Facebook page links
     facebook_patterns = [
@@ -198,24 +156,17 @@ def extract_contact_info(bio: str, user_info: Dict, external_url: Optional[str] 
                 business_email = business_contact.get('email') or business_contact.get('email_address')
                 business_phone = business_contact.get('phone_number') or business_contact.get('phone') or business_contact.get('contact_phone_number')
                 
-                # Use business email as primary email if no regular email found
+                # Only set business contact info if it's from public business settings
                 if business_email:
-                    if not contact_info['email']:
-                        contact_info['email'] = business_email
                     contact_info['business_email'] = business_email
                 
-                # Use business phone as primary phone if no regular phone found
                 if business_phone:
-                    if not contact_info['phone']:
-                        contact_info['phone'] = business_phone
                     contact_info['business_phone'] = business_phone
             
-            # Also check for direct business fields in user_info
-            if not contact_info['email']:
-                direct_business_email = user_info.get('public_email') or user_info.get('business_email')
-                if direct_business_email:
-                    contact_info['email'] = direct_business_email
-                    contact_info['business_email'] = direct_business_email
+            # Also check for direct business fields in user_info (public business info)
+            direct_business_email = user_info.get('public_email') or user_info.get('business_email')
+            if direct_business_email:
+                contact_info['business_email'] = direct_business_email
     
     return contact_info
 
