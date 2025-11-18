@@ -50,6 +50,16 @@ install:
 # Run development server
 dev:
 	@echo "🚀 Starting development server..."
+	@if [ -f .env ]; then \
+		ACCOUNT=$$(grep "^INSTAGRAM_USERNAME=" .env | cut -d'=' -f2 | tr -d '"' | tr -d "'"); \
+		if [ -n "$$ACCOUNT" ]; then \
+			echo "👤 Active account: $$ACCOUNT"; \
+		else \
+			echo "⚠️  No active account found in .env"; \
+		fi; \
+	else \
+		echo "⚠️  .env file not found"; \
+	fi
 	@echo "📝 Debug mode: ON"
 	@echo "🔄 Auto-reload: OFF (to avoid reloading on example.py changes)"
 	@$(PYTHON_VENV) app.py
