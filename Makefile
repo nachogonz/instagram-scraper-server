@@ -74,35 +74,29 @@ run:
 # Run example/test script (always searches for user info)
 test:
 	@echo "🧪 Running test script..."
-	@if [ -n "$(CSV)" ]; then \
-		if [ -z "$(LIMIT)" ]; then \
-			echo "❌ Error: LIMIT is required for CSV batch mode"; \
-			echo ""; \
-			echo "Usage:"; \
-			echo "  make test CSV=1 LIMIT=10"; \
-			echo "  make test CSV=docs/kilombo.csv LIMIT=50"; \
-			exit 1; \
-		fi; \
-		if [ "$(CSV)" = "1" ]; then \
-			$(PYTHON_VENV) src/test.py --csv $(LIMIT); \
-		else \
+	@if [ -n "$(USERNAME)" ]; then \
+		$(PYTHON_VENV) src/test.py $(USERNAME) $(LIMIT); \
+	elif [ -n "$(LIMIT)" ]; then \
+		if [ -n "$(CSV)" ] && [ "$(CSV)" != "1" ]; then \
 			$(PYTHON_VENV) src/test.py --csv $(CSV) $(LIMIT); \
+		else \
+			$(PYTHON_VENV) src/test.py --csv $(LIMIT); \
 		fi; \
-	elif [ -z "$(USERNAME)" ]; then \
+	else \
 		echo "Usage:"; \
 		echo "  Single user mode:"; \
 		echo "    make test USERNAME=target_account"; \
 		echo ""; \
-		echo "  CSV batch mode:"; \
-		echo "    make test CSV=1 LIMIT=10"; \
+		echo "  CSV batch mode (default file):"; \
+		echo "    make test LIMIT=10"; \
+		echo ""; \
+		echo "  CSV batch mode (custom file):"; \
 		echo "    make test CSV=docs/kilombo.csv LIMIT=50"; \
 		echo ""; \
 		echo "Examples:"; \
 		echo "  make test USERNAME=leomessi"; \
-		echo "  make test CSV=1 LIMIT=10"; \
+		echo "  make test LIMIT=10"; \
 		echo "  make test CSV=docs/kilombo.csv LIMIT=50"; \
-	else \
-		$(PYTHON_VENV) src/test.py $(USERNAME) $(LIMIT); \
 	fi
 
 # Stop server (find and kill process on port 5001)
