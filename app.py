@@ -114,9 +114,13 @@ def extract_contact_info(bio: str, user_info: Dict) -> Dict[str, Optional[str]]:
         contact_info['website'] = urls[0]
     
     # Check for business contact info
-    if user_info.get('is_business'):
-        contact_info['business_email'] = user_info.get('business_contact_method', {}).get('email')
-        contact_info['business_phone'] = user_info.get('business_contact_method', {}).get('phone_number')
+    # Handle case where user_info might not be a dict
+    if isinstance(user_info, dict):
+        if user_info.get('is_business'):
+            business_contact = user_info.get('business_contact_method', {})
+            if isinstance(business_contact, dict):
+                contact_info['business_email'] = business_contact.get('email')
+                contact_info['business_phone'] = business_contact.get('phone_number')
     
     return contact_info
 
@@ -250,7 +254,12 @@ def get_followers():
                 
                 # Extract contact info from bio
                 bio = user_details.biography or ''
-                contact_info = extract_contact_info(bio, user_details.dict())
+                # Safely convert user_details to dict
+                try:
+                    user_dict = user_details.dict() if hasattr(user_details, 'dict') else {}
+                except:
+                    user_dict = {}
+                contact_info = extract_contact_info(bio, user_dict)
                 
                 follower_data = {
                     'username': user_details.username,
@@ -345,6 +354,7 @@ def get_user_info():
             user_id = target_user_id
         
         # Get user details
+        # Note: This works for ANY public Instagram user, not just followers
         try:
             user_details = client.user_info(user_id)
         except LoginRequired:
@@ -356,9 +366,22 @@ def get_user_info():
                 user_details = client.user_info(user_id)
             except Exception as retry_error:
                 return jsonify({'error': f'Session expired and re-authentication failed: {str(retry_error)}'}), 401
+        except Exception as e:
+            error_msg = str(e).lower()
+            if 'private' in error_msg or 'not authorized' in error_msg:
+                return jsonify({
+                    'error': f'Cannot access user @{target_username or user_id}: Account is private and you don\'t follow them',
+                    'is_private': True
+                }), 403
+            raise
         
         bio = user_details.biography or ''
-        contact_info = extract_contact_info(bio, user_details.dict())
+        # Safely convert user_details to dict
+        try:
+            user_dict = user_details.dict() if hasattr(user_details, 'dict') else {}
+        except:
+            user_dict = {}
+        contact_info = extract_contact_info(bio, user_dict)
         
         user_data = {
             'username': user_details.username,
