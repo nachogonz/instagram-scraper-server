@@ -892,6 +892,68 @@ def batch_process():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/csv-data', methods=['GET'])
+def get_csv_data():
+    """Get CSV data from the server"""
+    import csv
+    from pathlib import Path
+    
+    try:
+        # Look for CSV file in docs directory
+        csv_path = Path('docs/kilombo.csv')
+        if not csv_path.exists():
+            # Try relative to script location
+            script_dir = Path(__file__).parent.parent
+            csv_path = script_dir / 'docs' / 'kilombo.csv'
+            if not csv_path.exists():
+                return jsonify({'error': 'CSV file not found'}), 404
+        
+        rows = []
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                rows.append(row)
+        
+        return jsonify({
+            'status': 'success',
+            'total': len(rows),
+            'columns': list(rows[0].keys()) if rows else [],
+            'data': rows[:1000]  # Return first 1000 rows for preview
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/csv-data/all', methods=['GET'])
+def get_all_csv_data():
+    """Get all CSV data from the server"""
+    import csv
+    from pathlib import Path
+    
+    try:
+        # Look for CSV file in docs directory
+        csv_path = Path('docs/kilombo.csv')
+        if not csv_path.exists():
+            # Try relative to script location
+            script_dir = Path(__file__).parent.parent
+            csv_path = script_dir / 'docs' / 'kilombo.csv'
+            if not csv_path.exists():
+                return jsonify({'error': 'CSV file not found'}), 404
+        
+        rows = []
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                rows.append(row)
+        
+        return jsonify({
+            'status': 'success',
+            'total': len(rows),
+            'columns': list(rows[0].keys()) if rows else [],
+            'data': rows
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     port = int(os.getenv('FLASK_PORT', 5001))
     host = os.getenv('FLASK_HOST', '0.0.0.0')
