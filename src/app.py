@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 # Global client instance
 cl = None
 
-def login_client(client: Client, force: bool = False) -> bool:
-    """Login to Instagram"""
+def login_client(client: Client, force: bool = False, max_retries: int = 3) -> bool:
+    """Login to Instagram with retry logic"""
     username = os.getenv('INSTAGRAM_USERNAME')
     password = os.getenv('INSTAGRAM_PASSWORD')
     
@@ -41,32 +41,75 @@ def login_client(client: Client, force: bool = False) -> bool:
             with open(session_file, 'r') as f:
                 session_data = json.load(f)
                 client.set_settings(session_data)
-                client.login(username, password)
-                print("✅ Loaded existing session")
-                return True
-        except (LoginRequired, Exception) as e:
-            print(f"⚠️  Could not load session: {e}")
-            if isinstance(e, LoginRequired):
-                print("🔄 Session expired, re-authenticating...")
-    
-    # Login (either new or re-authentication)
-    try:
-        client.login(username, password)
-        print("✅ Successfully logged in to Instagram")
-        
-        # Save session
-        try:
-            settings = client.get_settings()
-            with open(session_file, 'w') as f:
-                json.dump(settings, f)
-            print("💾 Session saved")
+                # Don't call login() when loading session - just verify it works
+                # by trying a lightweight operation
+                try:
+                    # Try to get current user to verify session is valid
+                    client.account_info()
+                    print("✅ Loaded existing session (verified)")
+                    return True
+                except LoginRequired:
+                    # Session is invalid, will fall through to login
+                    print("🔄 Session expired, re-authenticating...")
+                    pass
         except Exception as e:
-            print(f"⚠️  Could not save session: {e}")
-        
-        return True
-    except Exception as e:
-        print(f"❌ Login failed: {e}")
-        raise
+            print(f"⚠️  Could not load session: {e}")
+            # Fall through to login
+    
+    # Login (either new or re-authentication) with retry logic
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            client.login(username, password)
+            print("✅ Successfully logged in to Instagram")
+            
+            # Save session
+            try:
+                settings = client.get_settings()
+                with open(session_file, 'w') as f:
+                    json.dump(settings, f)
+                print("💾 Session saved")
+            except Exception as e:
+                print(f"⚠️  Could not save session: {e}")
+            
+            return True
+        except Exception as e:
+            last_error = e
+            error_str = str(e).lower()
+            
+            # Determine wait time based on error type
+            if 'challenge' in error_str or '500' in error_str:
+                # Challenge or server errors: wait 5-15 minutes
+                wait_minutes = 10 if attempt == 1 else 15
+                wait_seconds = wait_minutes * 60
+                print(f"❌ Login failed (attempt {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    print(f"⏳ Waiting {wait_minutes} minutes before retry (Instagram challenge/rate limit)...")
+                    time.sleep(wait_seconds)
+                else:
+                    print(f"❌ Max retries reached. Please wait {wait_minutes} minutes and try again.")
+            elif 'rate limit' in error_str or 'too many' in error_str:
+                # Rate limit: wait 15-30 minutes
+                wait_minutes = 20 if attempt == 1 else 30
+                wait_seconds = wait_minutes * 60
+                print(f"❌ Login failed (attempt {attempt}/{max_retries}): Rate limited")
+                if attempt < max_retries:
+                    print(f"⏳ Waiting {wait_minutes} minutes before retry (Instagram rate limit)...")
+                    time.sleep(wait_seconds)
+                else:
+                    print(f"❌ Max retries reached. Please wait {wait_minutes} minutes and try again.")
+            else:
+                # Other errors: wait 1-3 minutes
+                wait_minutes = 2 if attempt == 1 else 3
+                wait_seconds = wait_minutes * 60
+                print(f"❌ Login failed (attempt {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    print(f"⏳ Waiting {wait_minutes} minutes before retry...")
+                    time.sleep(wait_seconds)
+    
+    # All retries failed
+    print(f"❌ Login failed after {max_retries} attempts: {last_error}")
+    raise last_error
 
 def get_client(force_login: bool = False) -> Client:
     """Get or create Instagram client instance"""
@@ -77,6 +120,14 @@ def get_client(force_login: bool = False) -> Client:
         if cl is None:
             cl = Client()
         login_client(cl, force=force_login)
+    else:
+        # Verify existing client session is still valid
+        try:
+            cl.account_info()
+        except LoginRequired:
+            # Session expired, re-authenticate
+            print("🔄 Existing session expired, re-authenticating...")
+            login_client(cl, force=True)
     
     return cl
 
