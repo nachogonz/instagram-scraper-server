@@ -819,7 +819,6 @@ def get_user_info():
         
         return jsonify({
             'status': 'success', 
-            'user': user_data,
             'raw_data': raw_user_data
         })
     
