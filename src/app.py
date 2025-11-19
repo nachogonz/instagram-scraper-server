@@ -733,6 +733,165 @@ def get_user_info():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/batch-process', methods=['POST'])
+def batch_process():
+    """Process multiple users from a list of usernames"""
+    global cl
+    try:
+        client = get_client()
+        data = request.json or {}
+        
+        usernames = data.get('usernames', [])
+        if not usernames or not isinstance(usernames, list):
+            return jsonify({'error': 'usernames array is required'}), 400
+        
+        results = []
+        successful = 0
+        failed = 0
+        
+        for idx, username in enumerate(usernames, 1):
+            if not username or not isinstance(username, str):
+                continue
+            
+            username = username.strip().lstrip('@')
+            if not username:
+                continue
+            
+            try:
+                # Get user info
+                try:
+                    user_id = client.user_id_from_username(username)
+                except LoginRequired:
+                    cl = None
+                    client = get_client(force_login=True)
+                    user_id = client.user_id_from_username(username)
+                except UserNotFound:
+                    results.append({
+                        'username': username,
+                        'status': 'failed',
+                        'error': 'User not found',
+                        'data': None
+                    })
+                    failed += 1
+                    continue
+                
+                # Get user details
+                try:
+                    user_details = client.user_info(user_id)
+                except LoginRequired:
+                    cl = None
+                    client = get_client(force_login=True)
+                    user_details = client.user_info(user_id)
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    if 'private' in error_msg or 'not authorized' in error_msg:
+                        results.append({
+                            'username': username,
+                            'status': 'failed',
+                            'error': 'Account is private',
+                            'data': None
+                        })
+                    else:
+                        results.append({
+                            'username': username,
+                            'status': 'failed',
+                            'error': str(e),
+                            'data': None
+                        })
+                    failed += 1
+                    continue
+                
+                # Extract contact info
+                bio = user_details.biography or ''
+                external_url = getattr(user_details, 'external_url', None) or ''
+                
+                try:
+                    user_dict = user_details.dict() if hasattr(user_details, 'dict') else {}
+                except:
+                    user_dict = {}
+                
+                # Extract business contact info (same logic as /user-info)
+                try:
+                    if hasattr(user_details, 'is_business') and user_details.is_business:
+                        if hasattr(user_details, 'business_contact_method'):
+                            business_method = user_details.business_contact_method
+                            if business_method:
+                                if 'business_contact_method' not in user_dict:
+                                    user_dict['business_contact_method'] = {}
+                                
+                                if hasattr(business_method, 'email') and business_method.email:
+                                    user_dict['business_contact_method']['email'] = business_method.email
+                                
+                                phone_number = None
+                                if hasattr(business_method, 'phone_number') and business_method.phone_number:
+                                    phone_number = business_method.phone_number
+                                elif hasattr(business_method, 'phone') and business_method.phone:
+                                    phone_number = business_method.phone
+                                
+                                country_code = None
+                                if hasattr(business_method, 'country_code') and business_method.country_code:
+                                    country_code = business_method.country_code
+                                
+                                if phone_number:
+                                    formatted_phone = format_phone_with_country_code(phone_number, country_code)
+                                    user_dict['business_contact_method']['phone_number'] = formatted_phone
+                except:
+                    pass
+                
+                contact_info = extract_contact_info(bio, user_dict, external_url)
+                
+                # Determine account type
+                account_type_str = 'personal'
+                if hasattr(user_details, 'is_business') and user_details.is_business:
+                    account_type_str = 'business'
+                elif hasattr(user_details, 'is_creator') and user_details.is_creator:
+                    account_type_str = 'creator'
+                
+                user_data = {
+                    'username': user_details.username,
+                    'full_name': user_details.full_name,
+                    'bio': bio,
+                    'is_verified': user_details.is_verified,
+                    'is_private': user_details.is_private,
+                    'follower_count': user_details.follower_count,
+                    'following_count': user_details.following_count,
+                    'post_count': user_details.media_count,
+                    'external_url': user_details.external_url,
+                    'account_type': account_type_str,
+                    **contact_info
+                }
+                
+                results.append({
+                    'username': username,
+                    'status': 'success',
+                    'data': {'status': 'success', 'user': user_data}
+                })
+                successful += 1
+                
+            except Exception as e:
+                results.append({
+                    'username': username,
+                    'status': 'failed',
+                    'error': str(e),
+                    'data': None
+                })
+                failed += 1
+            
+            # Small delay to avoid rate limiting
+            if idx < len(usernames):
+                time.sleep(0.5)
+        
+        return jsonify({
+            'status': 'success',
+            'total_processed': len(results),
+            'successful': successful,
+            'failed': failed,
+            'results': results
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     port = int(os.getenv('FLASK_PORT', 5001))
     host = os.getenv('FLASK_HOST', '0.0.0.0')
