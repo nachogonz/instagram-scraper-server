@@ -9,6 +9,16 @@ from typing import Optional, Dict, List
 import re
 import time
 import logging
+from pathlib import Path
+import csv
+import difflib
+
+# Try to import OpenAI, but make it optional
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
 
 load_dotenv()
 
@@ -296,6 +306,197 @@ def extract_contact_info(bio: str, user_info: Dict, external_url: Optional[str] 
                     contact_info['business_phone'] = format_phone_with_country_code(direct_business_phone, direct_country_code)
     
     return contact_info
+
+# Cache for categories
+CATEGORIES_CACHE = []
+
+def load_categories():
+    """Load categories from CSV file"""
+    global CATEGORIES_CACHE
+    if CATEGORIES_CACHE:
+        return CATEGORIES_CACHE
+        
+    try:
+        # Look for CSV file in docs directory
+        csv_path = Path('docs/instagram_categories.csv')
+        if not csv_path.exists():
+            # Try relative to script location
+            script_dir = Path(__file__).parent.parent
+            csv_path = script_dir / 'docs' / 'instagram_categories.csv'
+            
+        if csv_path.exists():
+            with open(csv_path, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                CATEGORIES_CACHE = [row['category'] for row in reader if row.get('category')]
+            logger.info(f"Loaded {len(CATEGORIES_CACHE)} categories from CSV")
+        else:
+            logger.warning("Categories CSV not found")
+            
+    except Exception as e:
+        logger.error(f"Error loading categories: {e}")
+        
+    return CATEGORIES_CACHE
+
+def find_closest_category(category_guess: str) -> Optional[str]:
+    """Find closest matching category from the allowed list"""
+    categories = load_categories()
+    if not categories or not category_guess:
+        return None
+    
+    category_guess_lower = category_guess.lower().strip()
+        
+    # Exact match (case-insensitive)
+    for cat in categories:
+        if cat.lower() == category_guess_lower:
+            return cat
+            
+    # Check if guess is contained in category or vice versa (for partial matches)
+    for cat in categories:
+        cat_lower = cat.lower()
+        if category_guess_lower in cat_lower or cat_lower in category_guess_lower:
+            # Prefer exact or very close matches
+            if len(category_guess_lower) > 3 and len(cat_lower) > 3:
+                return cat
+            
+    # Fuzzy match with better cutoff
+    matches = difflib.get_close_matches(category_guess, categories, n=3, cutoff=0.55)
+    if matches:
+        # Prefer matches that are common words
+        for match in matches:
+            if match.lower() in ['musician', 'athlete', 'artist', 'actor', 'chef', 'coach', 'photographer']:
+                return match
+        return matches[0]
+        
+    return None
+
+# Cache for AI results to avoid re-generating for same user in same session
+AI_ENRICHMENT_CACHE = {}
+
+def enrich_profile_with_ai(user_data: Dict) -> Dict:
+    """
+    Use LLM to enrich user profile with description, and optionally location/category if missing.
+    """
+    if not OPENAI_AVAILABLE:
+        logger.warning("OpenAI not available, skipping AI enrichment")
+        return {}
+        
+    username = user_data.get('username')
+    if not username:
+        return {}
+        
+    # Check cache
+    if username in AI_ENRICHMENT_CACHE:
+        return AI_ENRICHMENT_CACHE[username]
+
+    # Prepare prompt inputs
+    existing_category = user_data.get('category') or user_data.get('business_category_name')
+    existing_location = user_data.get('city_name') or user_data.get('address_street')
+    
+    needs_category = not existing_category
+    needs_location = not existing_location
+    
+    try:
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            logger.warning("OPENAI_API_KEY not set, skipping AI enrichment")
+            return {}
+            
+        client = OpenAI(api_key=api_key)
+        
+        # Get all categories for better matching
+        all_categories = load_categories()
+        
+        prompt_text = f"""Analyze this Instagram profile and provide missing details.
+
+Profile Data:
+Username: {username}
+Full Name: {user_data.get('full_name', '')}
+Bio: {user_data.get('biography', '') or user_data.get('bio', '')}
+External URL: {user_data.get('external_url', '')}
+Media Count: {user_data.get('media_count', 0)}
+Follower Count: {user_data.get('follower_count', 0)}
+
+Requirements:
+1. Generate a 4-sentence professional description/summary of the user/business based on their bio and details.
+
+2. LOCATION INFERENCE (if location is missing):
+   - FIRST PRIORITY: Infer their country of residence/where they currently live based on bio, mentions, or known facts
+   - SECOND PRIORITY: If residence unknown, use their nationality/country of origin
+   - Format: "City, Country" or "Country" if city unknown
+   - ONLY return null if absolutely no geographic information can be inferred
+   - For public figures (athletes, musicians, etc.), use your knowledge of where they live
+
+3. CATEGORY INFERENCE (if category is missing):
+   - Choose the MOST APPROPRIATE category from the provided list
+   - IMPORTANT: Do NOT choose "Album" for musicians - use "Musician", "Musician/Band", "Musical Instrument", etc.
+   - For athletes, use "Athlete" not other categories
+   - Match the person's primary profession/role, not secondary attributes
+   - Categories are case-sensitive - match EXACTLY from the list below
+
+ALL Valid Categories ({len(all_categories)} total):
+{', '.join(all_categories)}
+
+Return JSON format:
+{{
+    "description": "4 sentences description...",
+    "location_guess": "City, Country" or "Country" or null,
+    "category_guess": "Exact category name from list" or null
+}}
+"""
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",  # Using a valid model name instead of gpt-5.1-nano which doesn't exist
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that analyzes Instagram profiles. Always return valid JSON."},
+                {"role": "user", "content": prompt_text}
+            ],
+            temperature=0,
+            response_format={"type": "json_object"}
+        )
+        
+        result_text = response.choices[0].message.content
+        result = json.loads(result_text)
+        
+        enrichment = {
+            "ai_description": result.get("description")
+        }
+        
+        # Handle location - check for null strings
+        location_val = result.get("location_guess")
+        if needs_location and location_val:
+            location_val_str = str(location_val).strip()
+            # Check if it's not a null-like value
+            if location_val_str.lower() not in ['null', 'none', 'n/a', '']:
+                enrichment["ai_location"] = location_val_str
+                
+        # Handle category - validate against list with better matching
+        category_val = result.get("category_guess")
+        if needs_category and category_val:
+            category_val_str = str(category_val).strip()
+            # Check if it's not a null-like value
+            if category_val_str.lower() not in ['null', 'none', 'n/a', '']:
+                # First try exact match
+                matched_cat = find_closest_category(category_val_str)
+                if matched_cat:
+                    enrichment["ai_category"] = matched_cat
+                else:
+                    # Try with more lenient fuzzy matching
+                    categories = load_categories()
+                    matches = difflib.get_close_matches(category_val_str, categories, n=3, cutoff=0.5)
+                    if matches:
+                        enrichment["ai_category"] = matches[0]
+                        logger.info(f"Matched category '{category_val_str}' to '{matches[0]}' for {username}")
+                    else:
+                        logger.warning(f"Could not match category '{category_val_str}' for {username}")
+                
+        # Update cache
+        AI_ENRICHMENT_CACHE[username] = enrichment
+        logger.info(f"AI Enrichment success for {username}: {enrichment}")
+        return enrichment
+        
+    except Exception as e:
+        logger.error(f"AI Enrichment failed for {username}: {e}")
+        return {}
 
 @app.route('/health', methods=['GET'])
 def health():
@@ -830,6 +1031,14 @@ def get_user_info():
             # Fallback to user_dict if available
             raw_user_data = user_dict if user_dict else {}
         
+        # AI Enrichment
+        try:
+            enrichment = enrich_profile_with_ai(raw_user_data)
+            if enrichment:
+                raw_user_data.update(enrichment)
+        except Exception as e:
+            logger.warning(f"Enrichment error: {e}")
+
         return jsonify({
             'status': 'success', 
             'raw_data': raw_user_data
@@ -998,6 +1207,14 @@ def batch_process():
                 if contact_info:
                     raw_user_data.update(contact_info)
                 
+                # AI Enrichment
+                try:
+                    enrichment = enrich_profile_with_ai(raw_user_data)
+                    if enrichment:
+                        raw_user_data.update(enrichment)
+                except Exception as e:
+                    logger.warning(f"Enrichment error: {e}")
+
                 results.append({
                     'username': username,
                     'status': 'success',
