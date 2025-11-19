@@ -1311,6 +1311,105 @@ def get_all_csv_data():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/save-users', methods=['POST'])
+def save_users():
+    """Save users to JSON file"""
+    try:
+        data = request.json or {}
+        users = data.get('users', [])
+        
+        if not isinstance(users, list):
+            return jsonify({'error': 'users must be an array'}), 400
+        
+        # Get the data directory path
+        data_dir = Path('data')
+        if not data_dir.exists():
+            # Try relative to script location
+            script_dir = Path(__file__).parent.parent
+            data_dir = script_dir / 'data'
+            data_dir.mkdir(exist_ok=True)
+        
+        users_file = data_dir / 'added_users.json'
+        
+        # Load existing users to avoid duplicates
+        existing_users = []
+        if users_file.exists():
+            try:
+                with open(users_file, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+                    existing_users = existing_data.get('users', [])
+            except Exception as e:
+                logger.warning(f"Could not load existing users: {e}")
+                existing_users = []
+        
+        # Create a set of existing usernames for quick lookup
+        existing_usernames = {user.get('username') for user in existing_users if user.get('username')}
+        
+        # Append new users, avoiding duplicates
+        new_users = []
+        for user in users:
+            username = user.get('username')
+            if username and username not in existing_usernames:
+                existing_users.append(user)
+                existing_usernames.add(username)
+                new_users.append(username)
+        
+        # Save all users
+        users_data = {
+            'users': existing_users,
+            'last_updated': time.time()
+        }
+        
+        with open(users_file, 'w', encoding='utf-8') as f:
+            json.dump(users_data, f, indent=2, ensure_ascii=False)
+        
+        logger.info(f"Saved {len(new_users)} new users to {users_file}")
+        
+        return jsonify({
+            'status': 'success',
+            'total_users': len(existing_users),
+            'new_users': len(new_users),
+            'message': f'Saved {len(new_users)} new users'
+        })
+    
+    except Exception as e:
+        logger.error(f"Error saving users: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/load-users', methods=['GET'])
+def load_users():
+    """Load users from JSON file"""
+    try:
+        # Get the data directory path
+        data_dir = Path('data')
+        if not data_dir.exists():
+            # Try relative to script location
+            script_dir = Path(__file__).parent.parent
+            data_dir = script_dir / 'data'
+        
+        users_file = data_dir / 'added_users.json'
+        
+        if not users_file.exists():
+            return jsonify({
+                'status': 'success',
+                'users': [],
+                'total': 0
+            })
+        
+        with open(users_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            users = data.get('users', [])
+        
+        return jsonify({
+            'status': 'success',
+            'users': users,
+            'total': len(users)
+        })
+    
+    except Exception as e:
+        logger.error(f"Error loading users: {e}")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     port = int(os.getenv('FLASK_PORT', 5001))
     host = os.getenv('FLASK_HOST', '0.0.0.0')
