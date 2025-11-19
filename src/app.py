@@ -8,11 +8,19 @@ import json
 from typing import Optional, Dict, List
 import re
 import time
+import logging
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Global client instance
 cl = None
@@ -276,6 +284,7 @@ def get_followers():
         if target_username:
             try:
                 user_id = client.user_id_from_username(target_username)
+                logger.info(f"[RAW API] user_id_from_username('{target_username}') = {user_id}")
             except LoginRequired:
                 # Re-authenticate and retry
                 print("🔄 Session expired during username lookup, re-authenticating...")
@@ -283,6 +292,7 @@ def get_followers():
                 client = get_client(force_login=True)
                 try:
                     user_id = client.user_id_from_username(target_username)
+                    logger.info(f"[RAW API] user_id_from_username('{target_username}') = {user_id} [retry]")
                 except UserNotFound:
                     return jsonify({'error': f'User @{target_username} not found'}), 404
             except UserNotFound:
@@ -293,6 +303,8 @@ def get_followers():
         # Get followers
         try:
             followers = client.user_followers(user_id, amount=limit)
+            logger.info(f"[RAW API] user_followers(user_id='{user_id}', amount={limit})")
+            logger.info(f"[RAW API] Raw followers data: {json.dumps(followers, default=str, indent=2)}")
         except LoginRequired:
             # Try to re-authenticate and retry once
             print("🔄 Session expired, attempting re-authentication...")
@@ -300,6 +312,8 @@ def get_followers():
                 cl = None  # Reset client
                 client = get_client(force_login=True)
                 followers = client.user_followers(user_id, amount=limit)
+                logger.info(f"[RAW API] user_followers(user_id='{user_id}', amount={limit}) [retry]")
+                logger.info(f"[RAW API] Raw followers data: {json.dumps(followers, default=str, indent=2)}")
             except Exception as retry_error:
                 return jsonify({'error': f'Session expired and re-authentication failed: {str(retry_error)}'}), 401
         except PleaseWaitFewMinutes as e:
@@ -317,12 +331,28 @@ def get_followers():
                 # Get full user info
                 try:
                     user_details = client.user_info(user_id_str)
+                    # Log raw user info data
+                    try:
+                        raw_user_dict = user_details.dict() if hasattr(user_details, 'dict') else {}
+                        logger.info(f"[RAW API] user_info(user_id='{user_id_str}')")
+                        logger.info(f"[RAW API] Raw user info data: {json.dumps(raw_user_dict, default=str, indent=2)}")
+                    except Exception as log_error:
+                        logger.warning(f"[RAW API] Could not serialize user_info for logging: {log_error}")
+                        logger.info(f"[RAW API] user_info(user_id='{user_id_str}') = {type(user_details).__name__}")
                 except LoginRequired:
                     # Re-authenticate and retry
                     print(f"🔄 Session expired while fetching user {user_id_str}, re-authenticating...")
                     cl = None
                     client = get_client(force_login=True)
                     user_details = client.user_info(user_id_str)
+                    # Log raw user info data
+                    try:
+                        raw_user_dict = user_details.dict() if hasattr(user_details, 'dict') else {}
+                        logger.info(f"[RAW API] user_info(user_id='{user_id_str}') [retry]")
+                        logger.info(f"[RAW API] Raw user info data: {json.dumps(raw_user_dict, default=str, indent=2)}")
+                    except Exception as log_error:
+                        logger.warning(f"[RAW API] Could not serialize user_info for logging: {log_error}")
+                        logger.info(f"[RAW API] user_info(user_id='{user_id_str}') = {type(user_details).__name__} [retry]")
                 except Exception as e:
                     # If we can't get detailed info, use basic info from user_info
                     print(f"⚠️  Could not get detailed info for user {user_id_str}: {e}")
@@ -529,6 +559,7 @@ def get_user_info():
         if target_username:
             try:
                 user_id = client.user_id_from_username(target_username)
+                logger.info(f"[RAW API] user_id_from_username('{target_username}') = {user_id}")
             except LoginRequired:
                 # Re-authenticate and retry
                 print("🔄 Session expired during username lookup, re-authenticating...")
@@ -536,6 +567,7 @@ def get_user_info():
                 client = get_client(force_login=True)
                 try:
                     user_id = client.user_id_from_username(target_username)
+                    logger.info(f"[RAW API] user_id_from_username('{target_username}') = {user_id} [retry]")
                 except UserNotFound:
                     return jsonify({'error': f'User @{target_username} not found'}), 404
             except UserNotFound:
@@ -547,6 +579,14 @@ def get_user_info():
         # Note: This works for ANY public Instagram user, not just followers
         try:
             user_details = client.user_info(user_id)
+            # Log raw user info data
+            try:
+                raw_user_dict = user_details.dict() if hasattr(user_details, 'dict') else {}
+                logger.info(f"[RAW API] user_info(user_id='{user_id}')")
+                logger.info(f"[RAW API] Raw user info data: {json.dumps(raw_user_dict, default=str, indent=2)}")
+            except Exception as log_error:
+                logger.warning(f"[RAW API] Could not serialize user_info for logging: {log_error}")
+                logger.info(f"[RAW API] user_info(user_id='{user_id}') = {type(user_details).__name__}")
         except LoginRequired:
             # Try to re-authenticate and retry once
             print("🔄 Session expired, attempting re-authentication...")
@@ -554,6 +594,14 @@ def get_user_info():
                 cl = None  # Reset client
                 client = get_client(force_login=True)
                 user_details = client.user_info(user_id)
+                # Log raw user info data
+                try:
+                    raw_user_dict = user_details.dict() if hasattr(user_details, 'dict') else {}
+                    logger.info(f"[RAW API] user_info(user_id='{user_id}') [retry]")
+                    logger.info(f"[RAW API] Raw user info data: {json.dumps(raw_user_dict, default=str, indent=2)}")
+                except Exception as log_error:
+                    logger.warning(f"[RAW API] Could not serialize user_info for logging: {log_error}")
+                    logger.info(f"[RAW API] user_info(user_id='{user_id}') = {type(user_details).__name__} [retry]")
             except Exception as retry_error:
                 return jsonify({'error': f'Session expired and re-authentication failed: {str(retry_error)}'}), 401
         except Exception as e:
