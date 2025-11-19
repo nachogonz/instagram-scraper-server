@@ -726,7 +726,51 @@ def get_user_info():
             **contact_info
         }
         
-        return jsonify({'status': 'success', 'user': user_data})
+        # Get the complete raw data from the API
+        try:
+            # Try to convert user_details to dict (works for Pydantic models)
+            if hasattr(user_details, 'dict'):
+                try:
+                    raw_user_data = user_details.dict()
+                except:
+                    raw_user_data = {}
+            else:
+                raw_user_data = {}
+            
+            # If dict() didn't work or returned empty, extract all attributes
+            if not raw_user_data:
+                raw_user_data = {}
+                for attr in dir(user_details):
+                    if not attr.startswith('_') and not callable(getattr(user_details, attr, None)):
+                        try:
+                            value = getattr(user_details, attr, None)
+                            # Skip methods and complex objects that can't be serialized
+                            if not callable(value):
+                                # Try to convert nested objects to dict if possible
+                                if hasattr(value, 'dict'):
+                                    try:
+                                        raw_user_data[attr] = value.dict()
+                                    except:
+                                        raw_user_data[attr] = str(value)
+                                else:
+                                    raw_user_data[attr] = value
+                        except Exception as attr_error:
+                            # If we can't get the attribute, skip it
+                            pass
+            
+            # Ensure we have the user_dict data merged in (includes business_contact_method)
+            if user_dict:
+                raw_user_data.update(user_dict)
+        except Exception as e:
+            logger.warning(f"Could not extract raw user data: {e}")
+            # Fallback to user_dict if available
+            raw_user_data = user_dict if user_dict else {}
+        
+        return jsonify({
+            'status': 'success', 
+            'user': user_data,
+            'raw_data': raw_user_data
+        })
     
     except UserNotFound:
         return jsonify({'error': 'User not found'}), 404

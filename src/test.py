@@ -221,12 +221,23 @@ def get_user_info(username: str, quiet: bool = False):
             if not contact_found:
                 print("   ⚠️  No contact info found")
             
-            # Save to JSON file
+            # Save to JSON file - save the raw data from the API
             try:
                 os.makedirs('data', exist_ok=True)
                 filename = f'data/user_{username}.json'
+                # Save the raw data if available, otherwise save the full response
+                raw_data = data.get('raw_data', {})
+                if raw_data:
+                    # Save only the raw data from Instagram API
+                    save_data = {
+                        'status': 'success',
+                        'user': raw_data
+                    }
+                else:
+                    # Fallback to full response if raw_data not available
+                    save_data = data
                 with open(filename, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
+                    json.dump(save_data, f, indent=2, ensure_ascii=False, default=str)
                 print(f"\n✅ Data saved to {filename}")
             except Exception as e:
                 print(f"\n⚠️  Could not save to file: {e}")
