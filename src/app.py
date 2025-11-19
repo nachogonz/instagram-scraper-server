@@ -191,12 +191,25 @@ def extract_contact_info(bio: str, user_info: Dict, external_url: Optional[str] 
         'website': None,
         'business_email': None,
         'business_phone': None,
+        'email': None,  # Add email field for emails extracted from bio
     }
     
     # Combine bio and external_url for searching
     search_text = bio
     if external_url:
         search_text += ' ' + external_url
+    
+    # Extract email addresses from bio and external_url
+    # Pattern matches: user@domain.com, user@domain.com.mx, etc.
+    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}(?:\.[A-Z|a-z]{2,})?\b'
+    emails = re.findall(email_pattern, search_text, re.IGNORECASE)
+    if emails:
+        # Filter out common false positives (like @instagram, @facebook in text)
+        valid_emails = [email for email in emails if not any(
+            domain in email.lower() for domain in ['instagram.com', 'facebook.com', 'fb.com', 'twitter.com', 'x.com']
+        )]
+        if valid_emails:
+            contact_info['email'] = valid_emails[0]
     
     # Extract Facebook page links
     facebook_patterns = [
@@ -941,24 +954,57 @@ def batch_process():
                 elif hasattr(user_details, 'is_creator') and user_details.is_creator:
                     account_type_str = 'creator'
                 
-                user_data = {
-                    'username': user_details.username,
-                    'full_name': user_details.full_name,
-                    'bio': bio,
-                    'is_verified': user_details.is_verified,
-                    'is_private': user_details.is_private,
-                    'follower_count': user_details.follower_count,
-                    'following_count': user_details.following_count,
-                    'post_count': user_details.media_count,
-                    'external_url': user_details.external_url,
-                    'account_type': account_type_str,
-                    **contact_info
-                }
+                # Get the complete raw data from the API (same as /user-info endpoint)
+                try:
+                    # Try to convert user_details to dict (works for Pydantic models)
+                    if hasattr(user_details, 'dict'):
+                        try:
+                            raw_user_data = user_details.dict()
+                        except:
+                            raw_user_data = {}
+                    else:
+                        raw_user_data = {}
+                    
+                    # If dict() didn't work or returned empty, extract all attributes
+                    if not raw_user_data:
+                        raw_user_data = {}
+                        for attr in dir(user_details):
+                            if not attr.startswith('_') and not callable(getattr(user_details, attr, None)):
+                                try:
+                                    value = getattr(user_details, attr, None)
+                                    # Skip methods and complex objects that can't be serialized
+                                    if not callable(value):
+                                        # Try to convert nested objects to dict if possible
+                                        if hasattr(value, 'dict'):
+                                            try:
+                                                raw_user_data[attr] = value.dict()
+                                            except:
+                                                raw_user_data[attr] = str(value)
+                                        else:
+                                            raw_user_data[attr] = value
+                                except Exception as attr_error:
+                                    # If we can't get the attribute, skip it
+                                    pass
+                    
+                    # Ensure we have the user_dict data merged in (includes business_contact_method)
+                    if user_dict:
+                        raw_user_data.update(user_dict)
+                except Exception as e:
+                    logger.warning(f"Could not extract raw user data: {e}")
+                    # Fallback to user_dict if available
+                    raw_user_data = user_dict if user_dict else {}
+                
+                # Merge contact_info into raw_user_data so email and other contact info is available
+                if contact_info:
+                    raw_user_data.update(contact_info)
                 
                 results.append({
                     'username': username,
                     'status': 'success',
-                    'data': {'status': 'success', 'user': user_data}
+                    'data': {
+                        'status': 'success',
+                        'raw_data': raw_user_data
+                    }
                 })
                 successful += 1
                 
