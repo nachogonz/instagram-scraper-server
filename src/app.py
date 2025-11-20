@@ -372,7 +372,7 @@ def find_closest_category(category_guess: str) -> Optional[str]:
 # Cache for AI results to avoid re-generating for same user in same session
 AI_ENRICHMENT_CACHE = {}
 
-def enrich_profile_with_ai(user_data: Dict) -> Dict:
+def enrich_profile_with_ai(user_data: Dict, force_regenerate: bool = False) -> Dict:
     """
     Use LLM to enrich user profile with description, and optionally location/category if missing.
     """
@@ -384,16 +384,26 @@ def enrich_profile_with_ai(user_data: Dict) -> Dict:
     if not username:
         return {}
         
-    # Check cache
-    if username in AI_ENRICHMENT_CACHE:
+    # Check cache (skip if forcing regeneration)
+    if not force_regenerate and username in AI_ENRICHMENT_CACHE:
         return AI_ENRICHMENT_CACHE[username]
 
     # Prepare prompt inputs
     existing_category = user_data.get('category') or user_data.get('business_category_name')
     existing_location = user_data.get('city_name') or user_data.get('address_street')
     
-    needs_category = not existing_category
-    needs_location = not existing_location
+    # Check if location/category are AI-generated
+    # If ai_location exists and matches city_name, it's AI-generated
+    # If ai_category exists and matches category, it's AI-generated
+    has_ai_location = user_data.get('ai_location') is not None
+    has_ai_category = user_data.get('ai_category') is not None
+    is_location_ai_generated = has_ai_location and (not existing_location or existing_location == user_data.get('ai_location'))
+    is_category_ai_generated = has_ai_category and (not existing_category or existing_category == user_data.get('ai_category'))
+    
+    # If forcing regeneration, always regenerate AI fields (description, and location/category if they're AI-generated)
+    # Otherwise, only generate if missing
+    needs_category = force_regenerate or (not existing_category) or is_category_ai_generated
+    needs_location = force_regenerate or (not existing_location) or is_location_ai_generated
     
     try:
         api_key = os.getenv('OPENAI_API_KEY')
@@ -461,33 +471,38 @@ Return JSON format:
             "ai_description": result.get("description")
         }
         
-        # Handle location - check for null strings
+        # Handle location - only set ai_location if forcing regeneration or if location is AI-generated
         location_val = result.get("location_guess")
-        if needs_location and location_val:
+        if location_val:
             location_val_str = str(location_val).strip()
-            # Check if it's not a null-like value
-            if location_val_str.lower() not in ['null', 'none', 'n/a', '']:
-                enrichment["ai_location"] = location_val_str
+            # Check if it's not a null-like value or generic/invalid location
+            invalid_locations = ['null', 'none', 'n/a', 'na', '', 'country', 'unknown', 'not available']
+            if location_val_str.lower() not in invalid_locations:
+                # Only set ai_location if forcing regeneration or if we need location
+                if force_regenerate or needs_location:
+                    enrichment["ai_location"] = location_val_str
                 
-        # Handle category - validate against list with better matching
+        # Handle category - only set ai_category if forcing regeneration or if category is AI-generated
         category_val = result.get("category_guess")
-        if needs_category and category_val:
+        if category_val:
             category_val_str = str(category_val).strip()
             # Check if it's not a null-like value
             if category_val_str.lower() not in ['null', 'none', 'n/a', '']:
-                # First try exact match
-                matched_cat = find_closest_category(category_val_str)
-                if matched_cat:
-                    enrichment["ai_category"] = matched_cat
-                else:
-                    # Try with more lenient fuzzy matching
-                    categories = load_categories()
-                    matches = difflib.get_close_matches(category_val_str, categories, n=3, cutoff=0.5)
-                    if matches:
-                        enrichment["ai_category"] = matches[0]
-                        logger.info(f"Matched category '{category_val_str}' to '{matches[0]}' for {username}")
+                # Only set ai_category if forcing regeneration or if we need category
+                if force_regenerate or needs_category:
+                    # First try exact match
+                    matched_cat = find_closest_category(category_val_str)
+                    if matched_cat:
+                        enrichment["ai_category"] = matched_cat
                     else:
-                        logger.warning(f"Could not match category '{category_val_str}' for {username}")
+                        # Try with more lenient fuzzy matching
+                        categories = load_categories()
+                        matches = difflib.get_close_matches(category_val_str, categories, n=3, cutoff=0.5)
+                        if matches:
+                            enrichment["ai_category"] = matches[0]
+                            logger.info(f"Matched category '{category_val_str}' to '{matches[0]}' for {username}")
+                        else:
+                            logger.warning(f"Could not match category '{category_val_str}' for {username}")
                 
         # Update cache
         AI_ENRICHMENT_CACHE[username] = enrichment
@@ -1047,6 +1062,179 @@ def get_user_info():
     except UserNotFound:
         return jsonify({'error': 'User not found'}), 404
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/regenerate-ai', methods=['POST'])
+def regenerate_ai():
+    """Regenerate AI content (description, location, category) for a specific user"""
+    global cl
+    try:
+        client = get_client()
+        data = request.json or {}
+        
+        target_username = data.get('username')
+        target_user_id = data.get('user_id')
+        
+        if not target_username and not target_user_id:
+            return jsonify({'error': 'Either username or user_id is required'}), 400
+        
+        # Get user ID if username provided
+        if target_username:
+            try:
+                user_id = client.user_id_from_username(target_username)
+            except LoginRequired:
+                cl = None
+                client = get_client(force_login=True)
+                user_id = client.user_id_from_username(target_username)
+            except UserNotFound:
+                return jsonify({'error': f'User @{target_username} not found'}), 404
+        else:
+            user_id = target_user_id
+        
+        # Get user details
+        try:
+            user_details = client.user_info(user_id)
+        except LoginRequired:
+            cl = None
+            client = get_client(force_login=True)
+            user_details = client.user_info(user_id)
+        except Exception as e:
+            error_msg = str(e).lower()
+            if 'private' in error_msg or 'not authorized' in error_msg:
+                return jsonify({
+                    'error': f'Cannot access user @{target_username or user_id}: Account is private',
+                    'is_private': True
+                }), 403
+            raise
+        
+        bio = user_details.biography or ''
+        external_url = getattr(user_details, 'external_url', None) or ''
+        
+        # Convert user_details to dict
+        try:
+            user_dict = user_details.dict() if hasattr(user_details, 'dict') else {}
+        except:
+            user_dict = {}
+        
+        # Extract business contact info (same as /user-info endpoint)
+        try:
+            if hasattr(user_details, 'is_business') and user_details.is_business:
+                if hasattr(user_details, 'business_contact_method'):
+                    business_method = user_details.business_contact_method
+                    if business_method:
+                        if 'business_contact_method' not in user_dict:
+                            user_dict['business_contact_method'] = {}
+                        
+                        if hasattr(business_method, 'email') and business_method.email:
+                            user_dict['business_contact_method']['email'] = business_method.email
+                        
+                        phone_number = None
+                        if hasattr(business_method, 'phone_number') and business_method.phone_number:
+                            phone_number = business_method.phone_number
+                        elif hasattr(business_method, 'phone') and business_method.phone:
+                            phone_number = business_method.phone
+                        
+                        country_code = None
+                        if hasattr(business_method, 'country_code') and business_method.country_code:
+                            country_code = business_method.country_code
+                        
+                        if phone_number:
+                            formatted_phone = format_phone_with_country_code(phone_number, country_code)
+                            user_dict['business_contact_method']['phone_number'] = formatted_phone
+        except Exception as e:
+            logger.warning(f"Could not extract business contact: {e}")
+        
+        contact_info = extract_contact_info(bio, user_dict, external_url)
+        
+        # Get complete raw data
+        try:
+            if hasattr(user_details, 'dict'):
+                try:
+                    raw_user_data = user_details.dict()
+                except:
+                    raw_user_data = {}
+            else:
+                raw_user_data = {}
+            
+            if not raw_user_data:
+                raw_user_data = {}
+                for attr in dir(user_details):
+                    if not attr.startswith('_') and not callable(getattr(user_details, attr, None)):
+                        try:
+                            value = getattr(user_details, attr, None)
+                            if not callable(value):
+                                if hasattr(value, 'dict'):
+                                    try:
+                                        raw_user_data[attr] = value.dict()
+                                    except:
+                                        raw_user_data[attr] = str(value)
+                                else:
+                                    raw_user_data[attr] = value
+                        except Exception:
+                            pass
+            
+            if user_dict:
+                raw_user_data.update(user_dict)
+        except Exception as e:
+            logger.warning(f"Could not extract raw user data: {e}")
+            raw_user_data = user_dict if user_dict else {}
+        
+        # Merge contact_info
+        if contact_info:
+            raw_user_data.update(contact_info)
+        
+        # Force regenerate AI enrichment (bypass cache, always regenerate)
+        try:
+            # Clear cache for this user to force regeneration
+            username = raw_user_data.get('username')
+            if username and username in AI_ENRICHMENT_CACHE:
+                del AI_ENRICHMENT_CACHE[username]
+            
+            # Check which fields are AI-generated BEFORE regeneration
+            # Save original values to determine if location/category were AI-generated
+            original_ai_location = raw_user_data.get('ai_location')
+            original_ai_category = raw_user_data.get('ai_category')
+            original_location = raw_user_data.get('city_name') or raw_user_data.get('address_street')
+            original_category = raw_user_data.get('category') or raw_user_data.get('business_category_name')
+            
+            # Determine if location/category are AI-generated
+            # If ai_location exists and matches city_name (or city_name is empty), it's AI-generated
+            is_location_ai_generated = original_ai_location is not None and (not original_location or original_location == original_ai_location)
+            # If ai_category exists and matches category (or category is empty), it's AI-generated
+            is_category_ai_generated = original_ai_category is not None and (not original_category or original_category == original_ai_category)
+            
+            # Force regenerate - will always generate description, and location/category if they're AI-generated
+            enrichment = enrich_profile_with_ai(raw_user_data, force_regenerate=True)
+            if enrichment:
+                # Always update ai_description
+                if 'ai_description' in enrichment:
+                    raw_user_data['ai_description'] = enrichment['ai_description']
+                
+                # Only update ai_location and city_name if location was AI-generated
+                if is_location_ai_generated and 'ai_location' in enrichment:
+                    raw_user_data['ai_location'] = enrichment['ai_location']
+                    # Update city_name only if it was AI-generated (matches old ai_location or was empty)
+                    if not original_location or original_location == original_ai_location:
+                        raw_user_data['city_name'] = enrichment['ai_location']
+                
+                # Only update ai_category and category if category was AI-generated
+                if is_category_ai_generated and 'ai_category' in enrichment:
+                    raw_user_data['ai_category'] = enrichment['ai_category']
+                    # Update category only if it was AI-generated (matches old ai_category or was empty)
+                    if not original_category or original_category == original_ai_category:
+                        raw_user_data['category'] = enrichment['ai_category']
+        except Exception as e:
+            logger.warning(f"AI Enrichment error: {e}")
+        
+        return jsonify({
+            'status': 'success', 
+            'raw_data': raw_user_data
+        })
+    
+    except UserNotFound:
+        return jsonify({'error': 'User not found'}), 404
+    except Exception as e:
+        logger.error(f"Error regenerating AI: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/batch-process', methods=['POST'])
